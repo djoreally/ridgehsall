@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { defaultDailyCap, endOfDayUtc, intervalDaysFor } from "@/lib/scheduler";
 import { requirePageUser, getPageWorkspace } from "@/lib/authz";
+import { isHostedMode, hostedDailyCap, sentTodayCount } from "@/lib/hosted";
 import type { Frequency } from "@/lib/enums";
 
 export const dynamic = "force-dynamic";
@@ -46,6 +47,11 @@ export default async function Home({
     orderBy: { createdAt: "desc" },
   });
 
+  const hosted = isHostedMode();
+  const dailyCap = hosted ? hostedDailyCap() : null;
+  const usedToday = hosted ? await sentTodayCount(workspace.id) : 0;
+  const fromDomain = process.env.RESEND_FROM_DOMAIN;
+
   return (
     <>
       {sp.newkey && (
@@ -55,10 +61,44 @@ export default async function Home({
           Use it as the <code className="k">x-api-key</code> header.
         </div>
       )}
+      {sp.settings === "saved" && (
+        <div className="notice ok"><b>Sending settings saved.</b></div>
+      )}
+      {sp.settings === "bademail" && (
+        <div className="notice"><b>That reply-to address isn't a valid email.</b> Nothing was saved.</div>
+      )}
+
+      {hosted && (
+        <div className="card">
+          <h2>Sending</h2>
+          <p className="small">
+            Hosted sending is on — you're ready to send, no provider setup needed.
+            Emails go out from <code className="k">noreply@{fromDomain ?? "…"}</code> (our
+            verified domain, kept clean for everyone) with your name on them, and
+            replies land in your inbox.
+          </p>
+          <p className="small">Today: <b>{usedToday}</b> / {dailyCap} sends used</p>
+          <form className="inline" method="post" action="/api/workspaces/settings">
+            <label className="field">From name
+              <input type="text" name="fromName" maxLength={80} placeholder="Acme Newsletter" defaultValue={workspace.fromName ?? ""} />
+            </label>
+            <label className="field">Reply-to email
+              <input type="email" name="replyToEmail" maxLength={160} placeholder="you@acme.com" defaultValue={workspace.replyToEmail ?? ""} />
+            </label>
+            <button type="submit">Save</button>
+          </form>
+        </div>
+      )}
 
       <div className="card">
         <h2>Lists</h2>
-        {overview.length === 0 && <p className="muted">No lists yet — create one below.</p>}
+        {overview.length === 0 && (
+          <p className="muted">
+            {hosted
+              ? "You're ready to send — upload a list to get started. No provider setup needed."
+              : "No lists yet — create one below."}
+          </p>
+        )}
         {overview.length > 0 && (
           <table>
             <thead>

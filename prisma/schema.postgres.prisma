@@ -21,6 +21,11 @@ model Workspace {
   id           String        @id @default(cuid())
   name         String
   createdAt    DateTime      @default(now())
+  // Hosted sending identity (Resend): the display name emails come from and
+  // the address replies go to. The actual From address stays on the platform's
+  // verified domain — see README "Hosted mode".
+  fromName     String?
+  replyToEmail String?
   apiKeys      ApiKey[]
   lists        ContactList[]
   suppressions Suppression[]

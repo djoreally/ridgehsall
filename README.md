@@ -49,7 +49,13 @@ Useful scripts: `npm run build`, `npm run typecheck` (`tsc --noEmit`),
 | `APP_BASE_URL` | no | `http://localhost:3000` | Used to build unsubscribe URLs |
 | `CRON_SECRET` | yes (prod) | — | Guards `POST /api/cron/daily` (Bearer or `?secret=`) |
 | `UNSUBSCRIBE_SECRET` | yes (prod) | ephemeral per-process | HMAC secret for unsubscribe tokens |
-| `EMAIL_PROVIDER` | no | `console` | `console` \| `enginemailer` \| `mailchimp` |
+| `EMAIL_PROVIDER` | no | `console` (or `resend` in hosted mode) | `console` \| `enginemailer` \| `mailchimp` \| `resend`. An explicit value always wins; leave unset in hosted mode to get the `resend` default |
+| `HOSTED_MODE` | no | `false` | `true` = hosted sending via Resend; new signups send immediately |
+| `HOSTED_DAILY_SEND_CAP` | no | `1000` | Per-workspace sends per UTC day in hosted mode |
+| `RESEND_API_KEY` | for resend/hosted | — | Resend API key (`re_…`) |
+| `RESEND_FROM_DOMAIN` | for resend/hosted | — | Domain verified in the Resend dashboard; sends From `noreply@<domain>` |
+| `RESEND_FROM_NAME` | no | workspace name | Fallback display name |
+| `RESEND_WEBHOOK_SECRET` | yes (hosted) | — | Webhook signing secret (`whsec_…`) for `POST /api/webhooks/resend` |
 | `ENGINEMAILER_API_KEY` | for provider | — | EngineMailer `APIKey` header |
 | `ENGINEMAILER_FROM_EMAIL` / `_FROM_NAME` | for provider | — | Default sender |
 | `MANDRILL_API_KEY` | for provider | — | Mailchimp Transactional (Mandrill) key |
@@ -132,6 +138,8 @@ is appended automatically if the template omits it.
 
 ## Provider setup
 
+**Resend / hosted mode** — see "Hosted mode (Resend)" below.
+
 **EngineMailer** — set `EMAIL_PROVIDER=enginemailer` + `ENGINEMAILER_API_KEY`
 (the `APIKey` request header for `api.enginemailer.com`). Sending uses the V2
 transactional endpoint `POST /RESTAPI/V2/Submission/SendEmail`.
@@ -155,6 +163,49 @@ Campaign endpoints require a paid EngineMailer account.
   `MANDRILL_API_KEY` (a Mandrill API key from Mailchimp Transactional —
   **not** the Marketing API key). Sends via
   `POST https://mandrillapp.com/api/1.0/messages/send.json`.
+
+## Hosted mode (Resend)
+
+`HOSTED_MODE=true` turns ridgehsall into a hosted product: a new user signs up
+and can send immediately — no provider keys, no integration setup. Sending runs
+through Resend on the platform's shared verified domain.
+
+### Platform prerequisites (one-time, by the operator)
+
+1. **Verify `RESEND_FROM_DOMAIN`** in the Resend dashboard (Domains → add domain,
+   set the SPF/DKIM DNS records). Gmail/Yahoo will reject or spam-folder mail
+   from an unverified domain — this is the one thing that must be real.
+2. **Create a Resend API key** (`re_…`) → `RESEND_API_KEY`.
+3. **Register the webhook**: Resend dashboard → Webhooks → add endpoint
+   `https://<your-app>/api/webhooks/resend`, subscribe to `email.bounced` and
+   `email.complained` → copy the signing secret (`whsec_…`) to
+   `RESEND_WEBHOOK_SECRET`.
+4. Set `HOSTED_MODE=true` (and optionally `HOSTED_DAILY_SEND_CAP`, default 1000).
+
+### Why the From address is the platform's domain
+
+Resend only delivers from domains you've verified. Letting each workspace send
+from their own address would require every user to complete DNS verification —
+the opposite of "sign up and send". So:
+
+- **From** is always `noreply@<RESEND_FROM_DOMAIN>` (deliverability-safe, one
+  warmed identity).
+- The workspace's **from name** (set in the dashboard's Sending card) is the
+  display name recipients see.
+- The workspace's **reply-to address** is where replies actually go.
+
+### Reputation protections (shared domain)
+
+- **Daily cap**: `HOSTED_DAILY_SEND_CAP` (default 1000) per workspace per UTC
+  day, checked before a batch sends. Over-cap contacts are deferred to the next
+  day — never silently dropped (the dashboard shows today's usage).
+- **Auto-suppression**: `email.bounced` → contact marked `bounced` + workspace
+  suppression; `email.complained` → contact `unsubscribed` + suppression. The
+  webhook signature is verified (Svix); the endpoint fails closed without
+  `RESEND_WEBHOOK_SECRET`.
+- **Batch sends** use Resend's `/emails/batch` (up to 100/request, chunked),
+  with per-item idempotency keys so retries never double-send. Every send
+  carries `List-Unsubscribe` / `List-Unsubscribe-Post` headers.
 
 ## v0 limitations (honest)
 
