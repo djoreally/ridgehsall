@@ -25,6 +25,40 @@ model Workspace {
   lists        ContactList[]
   suppressions Suppression[]
   integrations Integration[]
+  members      WorkspaceMember[]
+}
+
+// Auth: users, sessions, and per-user workspace memberships.
+model User {
+  id           String            @id @default(cuid())
+  email        String            @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime          @default(now())
+  sessions     Session[]
+  memberships  WorkspaceMember[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([userId])
+}
+
+model WorkspaceMember {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  role        String    @default("member") // owner | member
+  createdAt   DateTime  @default(now())
+  @@unique([userId, workspaceId])
+  @@index([workspaceId])
 }
 
 model ApiKey {

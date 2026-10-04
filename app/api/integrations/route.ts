@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { db } from "@/lib/db";
 import { isIntegrationType } from "@/lib/enums";
-import { getDefaultWorkspace } from "@/lib/workspace";
+import { getDashboardContext } from "@/lib/authz";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,9 @@ export const dynamic = "force-dynamic";
 //   enginemailer: listId, apiKey? (falls back to ENGINEMAILER_API_KEY), emails (one per line)
 //   mailchimp:   listId, apiKey, serverPrefix, audienceId
 export async function POST(req: NextRequest) {
-  const workspace = await getDefaultWorkspace();
+  const ctx = await getDashboardContext(req);
+  if ("error" in ctx) return ctx.error;
+  const { workspace } = ctx;
   const form = await req.formData();
   const type = String(form.get("type") ?? "");
   const name = String(form.get("name") ?? "").trim() || `${type} integration`;

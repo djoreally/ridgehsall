@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { isFrequency, isListStatus } from "@/lib/enums";
 import { intervalDaysFor } from "@/lib/scheduler";
-import { getDefaultWorkspace } from "@/lib/workspace";
+import { getDashboardContext } from "@/lib/authz";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +19,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
 async function handleUpdate(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const workspace = await getDefaultWorkspace();
+  const ctx = await getDashboardContext(req);
+  if ("error" in ctx) return ctx.error;
+  const { workspace } = ctx;
   const list = await db.contactList.findFirst({ where: { id, workspaceId: workspace.id } });
   if (!list) return NextResponse.json({ error: "list not found" }, { status: 404 });
 

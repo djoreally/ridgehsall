@@ -57,6 +57,28 @@ Useful scripts: `npm run build`, `npm run typecheck` (`tsc --noEmit`),
 
 ## API reference
 
+**Dashboard auth**: sign up at `/signup` (creates your personal workspace) or
+log in at `/login`. The dashboard (`/`, `/lists/*`) and its API
+(`/api/lists/*`, `/api/apikeys`, `/api/integrations/*`, `/api/workspaces/*`)
+require the session cookie. Workspaces are switched from the header; every
+query is scoped to workspaces you're a member of.
+
+```bash
+# auth (JSON)
+curl -s -X POST localhost:3000/api/auth/signup \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Jane","email":"jane@example.com","password":"longenough1"}'
+curl -s -X POST localhost:3000/api/auth/login \
+  -H 'Content-Type: application/json' -c jar.txt \
+  -d '{"email":"jane@example.com","password":"longenough1"}'
+curl -s -X POST localhost:3000/api/auth/logout -b jar.txt
+# new workspace / switch active workspace
+curl -s -X POST localhost:3000/api/workspaces -b jar.txt \
+  -H 'Content-Type: application/json' -d '{"name":"Client B"}'
+curl -s -X POST localhost:3000/api/workspaces/switch -b jar.txt \
+  -H 'Content-Type: application/json' -d '{"id":"<workspaceId>"}'
+```
+
 All `/api/v1/*` routes (except the webhook ingest URL) authenticate with the
 `x-api-key` header. Create a key in the dashboard (home page) — it's shown once.
 
@@ -136,10 +158,10 @@ Campaign endpoints require a paid EngineMailer account.
 
 ## v0 limitations (honest)
 
-- **Auth**: the dashboard is open (single default workspace); only the
-  `/api/v1/*` ingest API and `/api/bounces` require API keys, and the cron
-  endpoint requires `CRON_SECRET`. Real user auth (login, teams, roles) is a
-  follow-up.
+- **Auth**: email + password auth (scrypt), cookie sessions (30-day, httpOnly),
+  per-user workspaces with owner/member roles. No OAuth/SSO, no password reset
+  flow, no email verification, no 2FA. Session table has no scheduled cleanup
+  (expired sessions are dropped lazily on lookup).
 - **Single-node scheduler**: one process runs the cron. Multi-instance needs a
   distributed lock (the `@@unique([listId, date])` key prevents duplicate
   batches, but two nodes could both create items concurrently).

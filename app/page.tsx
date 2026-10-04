@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { defaultDailyCap, endOfDayUtc, intervalDaysFor } from "@/lib/scheduler";
-import { getDefaultWorkspace } from "@/lib/workspace";
+import { requirePageUser, getPageWorkspace } from "@/lib/authz";
 import type { Frequency } from "@/lib/enums";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,8 @@ export default async function Home({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const sp = await searchParams;
-  const workspace = await getDefaultWorkspace();
+  const user = await requirePageUser();
+  const workspace = await getPageWorkspace(user.id);
   const today = endOfDayUtc(new Date());
 
   const lists = await db.contactList.findMany({
@@ -87,7 +88,7 @@ export default async function Home({
         )}
 
         <h3>Create a list</h3>
-        <form className="inline" method="post" action="/api/v1/lists">
+        <form className="inline" method="post" action="/api/lists">
           <label className="field">Name<input type="text" name="name" required placeholder="Newsletter" /></label>
           <label className="field">Frequency
             <select name="frequency" defaultValue="weekly">

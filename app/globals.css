@@ -24,6 +24,10 @@ a { color: var(--accent); }
 header.top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 24px; }
 header.top h1 { margin: 0; font-size: 24px; }
 header.top h1 a { color: var(--ink); text-decoration: none; }
+.header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.header-right form.inline { align-items: center; }
+.auth-wrap { max-width: 440px; margin: 48px auto; }
+.form-stack { display: flex; flex-direction: column; gap: 12px; }
 .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .badge.active { background: #dcfce7; color: var(--green); }
 .badge.paused { background: #fef3c7; color: var(--amber); }

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { defaultDailyCap, endOfDayUtc, intervalDaysFor } from "@/lib/scheduler";
-import { getDefaultWorkspace } from "@/lib/workspace";
+import { requirePageUser, getPageWorkspace } from "@/lib/authz";
 import type { Frequency } from "@/lib/enums";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +26,8 @@ export default async function ListDetail({
 }) {
   const { id } = await params;
   const sp = await searchParams;
-  const workspace = await getDefaultWorkspace();
+  const user = await requirePageUser();
+  const workspace = await getPageWorkspace(user.id);
   const list = await db.contactList.findFirst({
     where: { id, workspaceId: workspace.id },
     include: { template: true },

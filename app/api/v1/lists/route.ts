@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { authenticateApiKey } from "@/lib/auth";
-import { isFrequency } from "@/lib/enums";
-import { intervalDaysFor } from "@/lib/scheduler";
-import { getDefaultWorkspace } from "@/lib/workspace";
+import { createContactList, ListInputError, parseCreateListBody } from "@/lib/lists";
 
 export const dynamic = "force-dynamic";
 
@@ -29,49 +27,29 @@ export async function GET(req: NextRequest) {
   });
 }
 
-// POST /api/v1/lists — create a list. Also used by the dashboard (falls back
-// to the default workspace when no API key is present — v0 open dashboard).
+// POST /api/v1/lists — create a list in the API key's workspace (x-api-key required).
 export async function POST(req: NextRequest) {
   const auth = await authenticateApiKey(req);
-  const workspaceId = auth?.workspaceId ?? (await getDefaultWorkspace()).id;
+  if (!auth) return NextResponse.json({ error: "invalid or missing x-api-key" }, { status: 401 });
 
-  let body: Record<string, unknown>;
   const contentType = req.headers.get("content-type") ?? "";
   const isJson = contentType.includes("application/json");
+  let body: Record<string, unknown>;
   try {
     body = isJson ? await req.json() : Object.fromEntries((await req.formData()).entries());
   } catch {
     return NextResponse.json({ error: "invalid body" }, { status: 400 });
   }
-  const name = typeof body.name === "string" ? body.name.trim() : "";
-  const frequency = body.frequency ?? "weekly";
-  if (!name) return NextResponse.json({ error: "name is required" }, { status: 400 });
-  if (!isFrequency(frequency)) {
-    return NextResponse.json({ error: "frequency must be one of daily|weekly|biweekly|monthly|custom" }, { status: 400 });
-  }
-  let customDays: number | null = null;
-  if (frequency === "custom") {
-    customDays = Number(body.customDays);
-    if (!Number.isInteger(customDays) || customDays < 1) {
-      return NextResponse.json({ error: "custom frequency requires customDays >= 1" }, { status: 400 });
-    }
-  }
-  try {
-    intervalDaysFor(frequency, customDays);
-  } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "bad frequency" }, { status: 400 });
-  }
 
-  const list = await db.contactList.create({
-    data: {
-      workspaceId,
-      name,
-      frequency,
-      customDays,
-      dailyCap: typeof body.dailyCap === "number" && body.dailyCap > 0 ? Math.floor(body.dailyCap) : null,
-      template: { create: {} },
-    },
-  });
+  let list;
+  try {
+    list = await createContactList(auth.workspaceId, parseCreateListBody(body));
+  } catch (e) {
+    if (e instanceof ListInputError) {
+      return NextResponse.json({ error: e.message }, { status: e.status });
+    }
+    throw e;
+  }
   if (!isJson) {
     return NextResponse.redirect(new URL(`/lists/${list.id}`, req.url), 303);
   }

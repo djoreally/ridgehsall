@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { upsertContacts, type IngestContact } from "@/lib/ingest";
 import { EngineMailerClient } from "@/lib/enginemailer";
 import { MailchimpMarketingClient } from "@/lib/mailchimp";
-import { getDefaultWorkspace } from "@/lib/workspace";
+import { getDashboardContext } from "@/lib/authz";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,9 @@ export const dynamic = "force-dynamic";
 // Mailchimp into the integration's target list (dashboard button).
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const workspace = await getDefaultWorkspace();
+  const ctx = await getDashboardContext(req);
+  if ("error" in ctx) return ctx.error;
+  const { workspace } = ctx;
   const integration = await db.integration.findFirst({ where: { id, workspaceId: workspace.id } });
   if (!integration) return NextResponse.json({ error: "integration not found" }, { status: 404 });
 
