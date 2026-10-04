@@ -1,0 +1,181 @@
+// ridgehsall v0 — multi-tenant marketing email list batching.
+//
+// Dual-provider setup: prisma/schema.prisma targets sqlite (local dev,
+// DATABASE_URL="file:./dev.db"). prisma/schema.postgres.prisma is identical
+// but targets postgresql. Select with the PRISMA_SCHEMA env var:
+//   PRISMA_SCHEMA=prisma/schema.postgres.prisma npm run db:push
+// The schema uses only provider-agnostic field types so `prisma db push` works on both.
+
+datasource db {
+  // Local dev default. For Postgres, use prisma/schema.postgres.prisma
+  // (PRISMA_SCHEMA=prisma/schema.postgres.prisma) — see README.
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Workspace {
+  id           String        @id @default(cuid())
+  name         String
+  createdAt    DateTime      @default(now())
+  // Hosted sending identity (Resend): the display name emails come from and
+  // the address replies go to. The actual From address stays on the platform's
+  // verified domain — see README "Hosted mode".
+  fromName     String?
+  replyToEmail String?
+  apiKeys      ApiKey[]
+  lists        ContactList[]
+  suppressions Suppression[]
+  integrations Integration[]
+  members      WorkspaceMember[]
+}
+
+// Auth: users, sessions, and per-user workspace memberships.
+model User {
+  id           String            @id @default(cuid())
+  email        String            @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime          @default(now())
+  sessions     Session[]
+  memberships  WorkspaceMember[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([userId])
+}
+
+model WorkspaceMember {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  role        String    @default("member") // owner | member
+  createdAt   DateTime  @default(now())
+  @@unique([userId, workspaceId])
+  @@index([workspaceId])
+}
+
+model ApiKey {
+  id          String     @id @default(cuid())
+  workspaceId String
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  keyHash     String     @unique
+  keyPrefix   String
+  createdAt   DateTime   @default(now())
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  @@index([workspaceId])
+}
+
+model ContactList {
+  id          String      @id @default(cuid())
+  workspaceId String
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  frequency   String      @default("weekly")
+  customDays  Int?
+  dailyCap    Int?
+  status      String      @default("active")
+  createdAt   DateTime    @default(now())
+  contacts    Contact[]
+  batches     Batch[]
+  template    Template?
+  @@index([workspaceId, status])
+}
+
+model Contact {
+  id         String        @id @default(cuid())
+  listId     String
+  list       ContactList   @relation(fields: [listId], references: [id], onDelete: Cascade)
+  email      String
+  firstName  String?
+  lastName   String?
+  fields     String?
+  status     String        @default("active")
+  source     String?
+  lastSentAt DateTime?
+  nextDueAt  DateTime      @default(now())
+  createdAt  DateTime      @default(now())
+  @@unique([listId, email])
+  @@index([listId, status, nextDueAt])
+}
+
+model Batch {
+  id        String      @id @default(cuid())
+  listId    String
+  list      ContactList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  date      String
+  status    String      @default("pending")
+  createdAt DateTime    @default(now())
+  items     BatchItem[]
+  @@unique([listId, date])
+  @@index([listId, date])
+}
+
+model BatchItem {
+  id        String     @id @default(cuid())
+  batchId   String
+  batch     Batch      @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  contactId String
+  status    String     @default("queued")
+  @@unique([batchId, contactId])
+  @@index([contactId])
+}
+
+model SendLog {
+  id        String   @id @default(cuid())
+  contactId String
+  batchId   String?
+  provider  String
+  status    String
+  messageId String?
+  error     String?
+  sentAt    DateTime @default(now())
+  @@index([contactId, sentAt])
+  @@index([batchId])
+}
+
+model Suppression {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  email       String
+  reason      String?
+  createdAt   DateTime  @default(now())
+  @@unique([workspaceId, email])
+}
+
+model Integration {
+  id          String          @id @default(cuid())
+  workspaceId String
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  type        String
+  name        String
+  config      String          @default("{}")
+  secret      String?
+  createdAt   DateTime        @default(now())
+  @@index([workspaceId, type])
+}
+
+model Template {
+  id        String      @id @default(cuid())
+  listId    String      @unique
+  list      ContactList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  subject   String      @default("Hello {{firstName}}")
+  htmlBody  String      @default("<p>Hi {{firstName}},</p><p>Thanks for being on our list.</p><p><a href=\"{{unsubscribeUrl}}\">Unsubscribe</a></p>")
+  fromName  String?
+  fromEmail String?
+  updatedAt DateTime    @updatedAt
+}
