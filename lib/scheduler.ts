@@ -99,6 +99,17 @@ export function startOfDayUtc(d: Date): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
+/**
+ * End of the UTC day. The scheduler treats a contact as due "today" when
+ * nextDueAt <= endOfDayUtc(today). This keeps the cooldown exact: a contact
+ * sent today at 09:00 with a 7-day interval becomes due exactly 7 days later,
+ * not 8 (which a start-of-day cutoff would cause). New contacts added during
+ * the day join today's batch if it hasn't run yet, at the back of the queue.
+ */
+export function endOfDayUtc(d: Date): Date {
+  return new Date(startOfDayUtc(d).getTime() + 24 * 60 * 60 * 1000 - 1);
+}
+
 // ---------------------------------------------------------------------------
 // Orchestration (Prisma-backed)
 // ---------------------------------------------------------------------------
@@ -124,6 +135,7 @@ export async function computeTodaysBatches(
   today: Date = new Date()
 ): Promise<BatchSummary[]> {
   const day = startOfDayUtc(today);
+  const dueCutoff = endOfDayUtc(today);
   const key = dateKey(day);
   const suppressions = await db.suppression.findMany({ where: { workspaceId } });
   const suppressionSet = new Set(suppressions.map((s) => s.email.toLowerCase()));
@@ -165,7 +177,7 @@ export async function computeTodaysBatches(
       where: {
         listId: list.id,
         status: "active",
-        nextDueAt: { lte: day },
+        nextDueAt: { lte: dueCutoff },
         id: { notIn: [...alreadyQueued] },
       },
       orderBy: [{ nextDueAt: "asc" }, { id: "asc" }],
@@ -175,12 +187,13 @@ export async function computeTodaysBatches(
 
     // Belt-and-braces: re-apply suppression at compute time (the DB query
     // can't easily do a case-insensitive NOT IN against the suppression table).
-    const picked = pickBatchContacts(candidates, { today: day, dailyCap: cap, suppression: suppressionSet });
+    const picked = pickBatchContacts(candidates, { today: dueCutoff, dailyCap: cap, suppression: suppressionSet });
 
     if (picked.length > 0) {
+      // already-queued contacts were excluded via the notIn filter above,
+      // so a plain createMany is safe (skipDuplicates isn't supported on SQLite).
       await db.batchItem.createMany({
         data: picked.map((c) => ({ batchId: batch!.id, contactId: c.id, status: "queued" })),
-        skipDuplicates: true,
       });
     }
 

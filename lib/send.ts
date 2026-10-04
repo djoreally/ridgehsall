@@ -33,7 +33,7 @@ export async function sendBatch(batchId: string, providerName?: string): Promise
     where: { id: batchId },
     include: {
       list: { include: { workspace: true, template: true } },
-      items: { where: { status: "queued" }, include: { contact: true } },
+      items: { where: { status: "queued" } },
     },
   });
   if (!batch) throw new Error(`batch not found: ${batchId}`);
@@ -42,6 +42,11 @@ export async function sendBatch(batchId: string, providerName?: string): Promise
   const intervalDays = intervalDaysFor(batch.list.frequency as Frequency, batch.list.customDays);
   const suppressions = await db.suppression.findMany({ where: { workspaceId: batch.list.workspaceId } });
   const suppressionSet = new Set(suppressions.map((s) => s.email.toLowerCase()));
+
+  const contacts = await db.contact.findMany({
+    where: { id: { in: batch.items.map((i) => i.contactId) } },
+  });
+  const contactById = new Map(contacts.map((c) => [c.id, c]));
 
   const provider = getProvider(providerName);
   const template = batch.list.template;
@@ -52,7 +57,12 @@ export async function sendBatch(batchId: string, providerName?: string): Promise
   let sent = 0, failed = 0, skipped = 0;
 
   for (const item of batch.items) {
-    const contact = item.contact;
+    const contact = contactById.get(item.contactId);
+    if (!contact) {
+      await db.batchItem.update({ where: { id: item.id }, data: { status: "skipped" } });
+      skipped++;
+      continue;
+    }
     const emailLower = contact.email.toLowerCase();
 
     // ---- send-time compliance re-check ----

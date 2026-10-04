@@ -14,6 +14,7 @@ import {
   applySend,
   dateKey,
   defaultDailyCap,
+  endOfDayUtc,
   intervalDaysFor,
   nextDueAtForNewContact,
   pickBatchContacts,
@@ -108,6 +109,9 @@ describe("applySend", () => {
 });
 
 describe("rotation simulation (the invariant, end to end)", () => {
+  interface SimContact extends DueCandidate {
+    lastSentAt: Date | null;
+  }
   /**
    * Mirrors the orchestration algorithm day by day:
    *   due = pickBatchContacts(...) -> "send" -> applySend -> next day
@@ -120,9 +124,6 @@ describe("rotation simulation (the invariant, end to end)", () => {
     start?: Date;
     extra?: (day: number, contacts: SimContact[]) => void;
   }) {
-    interface SimContact extends DueCandidate {
-      lastSentAt: Date | null;
-    }
     const start = startOfDayUtc(opts.start ?? new Date("2026-10-04T00:00:00Z"));
     const contacts: SimContact[] = Array.from({ length: opts.size }, (_, i) => ({
       id: `c${i}`,
@@ -135,7 +136,8 @@ describe("rotation simulation (the invariant, end to end)", () => {
     const sends: { contactId: string; day: number }[] = [];
 
     for (let day = 0; day < opts.days; day++) {
-      const today = new Date(start.getTime() + day * DAY);
+      // mirrors computeTodaysBatches: due cutoff is end of the UTC day
+      const today = endOfDayUtc(new Date(start.getTime() + day * DAY));
       opts.extra?.(day, contacts);
       const picked = pickBatchContacts(contacts, { today, dailyCap: cap, suppression: new Set() });
       const now = today;
@@ -247,6 +249,14 @@ describe("rotation simulation (the invariant, end to end)", () => {
     for (const s of sends) counts.set(s.contactId, (counts.get(s.contactId) ?? 0) + 1);
     expect(counts.size).toBe(30);
     for (const n of counts.values()) expect(n).toBe(5);
+  });
+
+  it("cooldown is exact: sent day 0 -> due again exactly intervalDays later", () => {
+    // guards the end-of-day cutoff: a start-of-day cutoff would push the
+    // second send to day 8 instead of day 7.
+    const { sends } = simulate({ size: 7, intervalDays: 7, days: 15 });
+    const c0 = sends.filter((s) => s.contactId === "c0").map((s) => s.day);
+    expect(c0).toEqual([0, 7, 14]);
   });
 
   it("dateKey is stable and day-granular", () => {
